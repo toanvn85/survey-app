@@ -136,13 +136,27 @@ def register_user(email, password, full_name, class_name):
 def get_user(email, password):
     """Kiểm tra đăng nhập và trả về thông tin người dùng"""
     try:
-        print(f"Attempting login for: {email}")
+        # Print debug info to Streamlit log
+        st.write(f"DEBUG: Attempting login for: {email} with password: {password}")
+        print(f"DEBUG: Attempting login for: {email} with password: {password}")
+        
+        # First check if any users exist
+        all_users = supabase.table('users').select('*').execute()
+        st.write(f"DEBUG: Total users in database: {len(all_users.data)}")
+        print(f"DEBUG: Total users in database: {len(all_users.data)}")
+        for u in all_users.data:
+            st.write(f"DEBUG: Found user: {u['email']} with role {u['role']}")
+            print(f"DEBUG: Found user: {u['email']} with role {u['role']}")
+        
+        # Now try to log in
         response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
-        print(f"Login response contains {len(response.data)} users")
+        st.write(f"DEBUG: Login query returned {len(response.data)} results")
+        print(f"DEBUG: Login query returned {len(response.data)} results")
         
         if response.data:
             user = response.data[0]
-            print(f"User found: {user['email']} with role {user['role']}")
+            st.write(f"DEBUG: User found: {user['email']} with role {user['role']}")
+            print(f"DEBUG: User found: {user['email']} with role {user['role']}")
             return {
                 "email": user["email"],
                 "role": user["role"],
@@ -151,16 +165,19 @@ def get_user(email, password):
                 "class": user.get("class", "")
             }
         else:
-            # Kiểm tra xem user có tồn tại không (để biết lỗi ở email hay password)
-            user_exists = supabase.table('users').select('*').eq('email', email).execute()
-            if user_exists.data:
-                print(f"User exists but password is incorrect")
+            # Just check if user exists
+            user_check = supabase.table('users').select('*').eq('email', email).execute()
+            if user_check.data:
+                st.write(f"DEBUG: User exists but password is wrong. Should be: {user_check.data[0]['password']}")
+                print(f"DEBUG: User exists but password is wrong. Should be: {user_check.data[0]['password']}")
             else:
-                print(f"No user found with email: {email}")
+                st.write(f"DEBUG: No user found with email: {email}")
+                print(f"DEBUG: No user found with email: {email}")
             return None
     except Exception as e:
-        print(f"Error during login: {e}")
-    return None
+        st.write(f"DEBUG ERROR: {type(e).__name__}: {str(e)}")
+        print(f"DEBUG ERROR: {type(e).__name__}: {str(e)}")
+        return None
 
 def update_password(email, new_password):
     """Cập nhật mật khẩu và đánh dấu đã đổi mật khẩu"""
