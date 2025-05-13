@@ -6,6 +6,16 @@ import base64
 from datetime import datetime
 import numpy as np
 from database_helper import get_all_questions, get_user_submissions, get_all_users
+from docx import Document
+import tempfile
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+import weasyprint
+from docx.enum.section import WD_ORIENTATION
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, Inches
 
 def format_date(date_value):
     """Định dạng ngày tháng từ nhiều kiểu dữ liệu khác nhau"""
@@ -38,11 +48,184 @@ def format_date(date_value):
         print(f"Error formatting date: {e}, value type: {type(date_value)}, value: {date_value}")
         return "N/A"
 
-def get_download_link(df, filename, text):
-    """Tạo link tải xuống cho DataFrame"""
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()  # Mã hóa string thành base64
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">📥 {text}</a>'
+def dataframe_to_docx(df, title, filename):
+    """Tạo file DOCX từ DataFrame"""
+    doc = Document()
+    
+    # Thiết lập font chữ mặc định
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Times New Roman'
+    font.size = Pt(12)
+    
+    # Thêm tiêu đề
+    doc.add_heading(title, level=1)
+    
+    # Tạo bảng
+    # Thêm một hàng cho tiêu đề cột
+    table = doc.add_table(rows=1, cols=len(df.columns), style='Table Grid')
+    
+    # Thêm tiêu đề cột
+    header_cells = table.rows[0].cells
+    for i, col_name in enumerate(df.columns):
+        header_cells[i].text = str(col_name)
+        # Đặt kiểu cho tiêu đề
+        for paragraph in header_cells[i].paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = paragraph.runs[0]
+            run.bold = True
+    
+    # Thêm dữ liệu
+    for _, row in df.iterrows():
+        row_cells = table.add_row().cells
+        for i, value in enumerate(row):
+            row_cells[i].text = str(value)
+    
+    # Tự động điều chỉnh cột
+    for column in table.columns:
+        for cell in column.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Lưu tệp
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    
+    return buffer
+
+def dataframe_to_pdf(df, title, filename):
+    """Tạo file PDF từ DataFrame sử dụng reportlab"""
+    buffer = io.BytesIO()
+    
+    # Tạo document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+    
+    # Container cho các thành phần của PDF
+    elements = []
+    
+    # Thêm tiêu đề
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph(title, styles['Title']))
+    elements.append(Spacer(1, 12))
+    
+    # Tạo dữ liệu cho bảng (bao gồm tiêu đề cột)
+    data = [df.columns.tolist()]
+    for _, row in df.iterrows():
+        data.append([str(x) for x in row.values.tolist()])
+    
+    # Tạo bảng
+    table = Table(data)
+    
+    # Thêm style cho bảng
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ])
+    table.setStyle(style)
+    
+    # Thêm bảng vào document
+    elements.append(table)
+    
+    # Xây dựng PDF
+    doc.build(elements)
+    
+    buffer.seek(0)
+    return buffer
+
+def get_html_table(df, title):
+    """Tạo HTML table từ DataFrame"""
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+        <style>
+            body {{
+                font-family: 'Times New Roman', Times, serif;
+                margin: 20px;
+                color: #333;
+            }}
+            h1 {{
+                color: #2C3E50;
+                text-align: center;
+                margin-bottom: 20px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }}
+            th, td {{
+                padding: 12px 15px;
+                border: 1px solid #ddd;
+                text-align: center;
+            }}
+            th {{
+                background-color: #3498DB;
+                color: white;
+                font-weight: bold;
+            }}
+            tr:nth-child(even) {{
+                background-color: #f2f2f2;
+            }}
+            .footer {{
+                text-align: center;
+                margin-top: 20px;
+                font-size: 12px;
+                color: #7f8c8d;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>{title}</h1>
+        {df.to_html(index=False)}
+        <div class="footer">
+            <p>Xuất báo cáo từ Hệ thống Khảo sát & Đánh giá</p>
+            <p>Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def html_to_pdf(html_string, filename):
+    """Tạo PDF từ HTML sử dụng WeasyPrint"""
+    try:
+        pdf = weasyprint.HTML(string=html_string).write_pdf()
+        return pdf
+    except Exception as e:
+        st.error(f"Lỗi khi tạo PDF: {str(e)}")
+        return None
+
+def get_download_link_docx(buffer, filename, text):
+    """Tạo link tải xuống cho file DOCX"""
+    b64 = base64.b64encode(buffer.getvalue()).decode()
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">📥 {text}</a>'
+    return href
+
+def get_download_link_pdf(buffer, filename, text):
+    """Tạo link tải xuống cho file PDF"""
+    if isinstance(buffer, bytes):
+        b64 = base64.b64encode(buffer).decode()
+    else:
+        b64 = base64.b64encode(buffer.getvalue()).decode()
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
     return href
 
 def export_to_excel(dataframes, sheet_names, filename):
@@ -254,6 +437,7 @@ def view_statistics():
                         
                         total_correct = 0
                         total_questions = len(questions)
+                        student_detail_data = []
                         
                         # Hiển thị câu trả lời chi tiết
                         for q in questions:
@@ -268,6 +452,15 @@ def view_statistics():
                             is_correct = set(user_ans) == set(expected)
                             if is_correct:
                                 total_correct += 1
+                            
+                            # Thu thập dữ liệu chi tiết
+                            student_detail_data.append({
+                                "Câu hỏi": f"Câu {q['id']}: {q['question']}",
+                                "Đáp án của học viên": ", ".join(user_ans) if user_ans else "Không trả lời",
+                                "Đáp án đúng": ", ".join(expected),
+                                "Kết quả": "Đúng" if is_correct else "Sai",
+                                "Điểm": q["score"] if is_correct else 0
+                            })
                             
                             # Hiển thị đáp án của người dùng
                             st.write("Đáp án của học viên:")
@@ -295,15 +488,165 @@ def view_statistics():
                         col2.metric("Điểm số", f"{submission['score']}/{max_possible}")
                         col3.metric("Tỷ lệ đúng", f"{(total_correct/total_questions*100):.1f}%")
                         
-                        # Xuất báo cáo cá nhân
-                        st.write("### Xuất báo cáo cá nhân")
+                        # Tạo DataFrame chi tiết
+                        df_student_detail = pd.DataFrame(student_detail_data)
                         
-                        # Tạo DataFrame cho báo cáo của học viên này
-                        student_submission = next((s for s in all_submission_data if s["ID"] == selected_submission), None)
-                        if student_submission:
-                            df_student = pd.DataFrame([student_submission])
-                            st.markdown(get_download_link(df_student, f"bao_cao_hoc_vien_{submission['user_email']}.csv", 
-                                                        "Tải xuống báo cáo chi tiết (CSV)"), unsafe_allow_html=True)
+                        # Xuất báo cáo chi tiết
+                        st.write("### Xuất báo cáo chi tiết")
+                        col1, col2 = st.columns(2)
+                        
+                        # Người dùng và thông tin
+                        student_info = next((student for student in students if student["email"] == submission["user_email"]), None)
+                        student_name = student_info["full_name"] if student_info else "Không xác định"
+                        student_class = student_info["class"] if student_info else "Không xác định"
+                        report_title = f"Báo cáo chi tiết bài làm - {student_name}"
+                        
+                        # Tạo PDF
+                        with col1:
+                            try:
+                                # Tạo HTML
+                                html_content = f"""
+                                <!DOCTYPE html>
+                                <html lang="vi">
+                                <head>
+                                    <meta charset="UTF-8">
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <title>{report_title}</title>
+                                    <style>
+                                        body {{
+                                            font-family: 'Times New Roman', Times, serif;
+                                            margin: 20px;
+                                            color: #333;
+                                        }}
+                                        h1, h2, h3 {{
+                                            color: #2C3E50;
+                                        }}
+                                        h1 {{
+                                            text-align: center;
+                                            margin-bottom: 10px;
+                                        }}
+                                        .info {{
+                                            margin: 20px 0;
+                                            padding: 10px;
+                                            background-color: #f8f9fa;
+                                            border-radius: 5px;
+                                        }}
+                                        table {{
+                                            width: 100%;
+                                            border-collapse: collapse;
+                                            margin: 20px 0;
+                                        }}
+                                        th, td {{
+                                            padding: 10px;
+                                            border: 1px solid #ddd;
+                                            text-align: left;
+                                        }}
+                                        th {{
+                                            background-color: #3498DB;
+                                            color: white;
+                                        }}
+                                        .correct {{
+                                            color: green;
+                                            font-weight: bold;
+                                        }}
+                                        .incorrect {{
+                                            color: red;
+                                        }}
+                                        .summary {{
+                                            margin-top: 30px;
+                                            padding: 15px;
+                                            background-color: #e9f7ef;
+                                            border-radius: 5px;
+                                        }}
+                                        .footer {{
+                                            text-align: center;
+                                            margin-top: 30px;
+                                            font-size: 12px;
+                                            color: #7f8c8d;
+                                        }}
+                                    </style>
+                                </head>
+                                <body>
+                                    <h1>{report_title}</h1>
+                                    
+                                    <div class="info">
+                                        <p><strong>Họ và tên:</strong> {student_name}</p>
+                                        <p><strong>Email:</strong> {submission["user_email"]}</p>
+                                        <p><strong>Lớp:</strong> {student_class}</p>
+                                        <p><strong>Thời gian nộp:</strong> {datetime.fromtimestamp(submission["timestamp"]).strftime("%H:%M:%S %d/%m/%Y")}</p>
+                                    </div>
+                                    
+                                    <h2>Chi tiết câu trả lời</h2>
+                                    <table>
+                                        <tr>
+                                            <th>Câu hỏi</th>
+                                            <th>Đáp án của học viên</th>
+                                            <th>Đáp án đúng</th>
+                                            <th>Kết quả</th>
+                                            <th>Điểm</th>
+                                        </tr>
+                                """
+                                
+                                for _, row in df_student_detail.iterrows():
+                                    result_class = "correct" if row["Kết quả"] == "Đúng" else "incorrect"
+                                    html_content += f"""
+                                        <tr>
+                                            <td>{row["Câu hỏi"]}</td>
+                                            <td>{row["Đáp án của học viên"]}</td>
+                                            <td>{row["Đáp án đúng"]}</td>
+                                            <td class="{result_class}">{row["Kết quả"]}</td>
+                                            <td>{row["Điểm"]}</td>
+                                        </tr>
+                                    """
+                                
+                                html_content += f"""
+                                    </table>
+                                    
+                                    <div class="summary">
+                                        <h2>Tổng kết</h2>
+                                        <p><strong>Số câu đúng:</strong> {total_correct}/{total_questions}</p>
+                                        <p><strong>Điểm số:</strong> {submission['score']}/{max_possible}</p>
+                                        <p><strong>Tỷ lệ đúng:</strong> {(total_correct/total_questions*100):.1f}%</p>
+                                    </div>
+                                    
+                                    <div class="footer">
+                                        <p>Xuất báo cáo từ Hệ thống Khảo sát & Đánh giá</p>
+                                        <p>Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+                                    </div>
+                                </body>
+                                </html>
+                                """
+                                
+                                # Tạo PDF từ HTML
+                                pdf_data = html_to_pdf(html_content, f"bao_cao_{submission['user_email']}.pdf")
+                                if pdf_data:
+                                    st.markdown(
+                                        get_download_link_pdf(pdf_data, 
+                                                            f"bao_cao_{student_name}_{submission['id']}.pdf", 
+                                                            "Tải xuống báo cáo chi tiết (PDF)"), 
+                                        unsafe_allow_html=True
+                                    )
+                            except Exception as e:
+                                st.error(f"Không thể tạo PDF: {str(e)}")
+                        
+                        # Tạo DOCX
+                        with col2:
+                            try:
+                                # Tạo DOCX
+                                docx_buffer = dataframe_to_docx(
+                                    df_student_detail, 
+                                    f"Báo cáo chi tiết bài làm - {student_name}",
+                                    f"bao_cao_{submission['user_email']}.docx"
+                                )
+                                
+                                st.markdown(
+                                    get_download_link_docx(docx_buffer, 
+                                                        f"bao_cao_{student_name}_{submission['id']}.docx", 
+                                                        "Tải xuống báo cáo chi tiết (DOCX)"), 
+                                    unsafe_allow_html=True
+                                )
+                            except Exception as e:
+                                st.error(f"Không thể tạo DOCX: {str(e)}")
     
     with tab3:
         st.subheader("Phân tích theo câu hỏi")
@@ -540,20 +883,104 @@ def view_statistics():
         
         # Hiển thị các loại báo cáo có thể xuất
         st.write("### 1. Báo cáo tất cả bài nộp")
-        st.markdown(get_download_link(df_all_submissions, "bao_cao_tat_ca_bai_nop.csv", 
-                                      "Tải xuống báo cáo tất cả bài nộp (CSV)"), unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        title1 = "Báo cáo tất cả bài nộp"
+        
+        with col1:
+            try:
+                # PDF
+                pdf_data = html_to_pdf(get_html_table(df_all_submissions, title1), "bao_cao_tat_ca_bai_nop.pdf")
+                if pdf_data:
+                    st.markdown(get_download_link_pdf(pdf_data, "bao_cao_tat_ca_bai_nop.pdf", 
+                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo PDF: {str(e)}")
+                
+        with col2:
+            try:
+                # DOCX
+                docx_buffer = dataframe_to_docx(df_all_submissions, title1, "bao_cao_tat_ca_bai_nop.docx")
+                st.markdown(get_download_link_docx(docx_buffer, "bao_cao_tat_ca_bai_nop.docx", 
+                                            "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo DOCX: {str(e)}")
         
         st.write("### 2. Báo cáo thống kê câu hỏi")
-        st.markdown(get_download_link(df_questions, "bao_cao_thong_ke_cau_hoi.csv", 
-                                     "Tải xuống báo cáo thống kê câu hỏi (CSV)"), unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        title2 = "Báo cáo thống kê câu hỏi"
+        
+        with col1:
+            try:
+                # PDF
+                pdf_data = html_to_pdf(get_html_table(df_questions, title2), "bao_cao_thong_ke_cau_hoi.pdf")
+                if pdf_data:
+                    st.markdown(get_download_link_pdf(pdf_data, "bao_cao_thong_ke_cau_hoi.pdf", 
+                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo PDF: {str(e)}")
+                
+        with col2:
+            try:
+                # DOCX
+                docx_buffer = dataframe_to_docx(df_questions, title2, "bao_cao_thong_ke_cau_hoi.docx")
+                st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_cau_hoi.docx", 
+                                            "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo DOCX: {str(e)}")
         
         st.write("### 3. Báo cáo danh sách học viên")
-        st.markdown(get_download_link(df_students_list, "bao_cao_danh_sach_hoc_vien.csv", 
-                                     "Tải xuống danh sách học viên (CSV)"), unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        title3 = "Báo cáo danh sách học viên"
+        
+        with col1:
+            try:
+                # PDF
+                pdf_data = html_to_pdf(get_html_table(df_students_list, title3), "bao_cao_danh_sach_hoc_vien.pdf")
+                if pdf_data:
+                    st.markdown(get_download_link_pdf(pdf_data, "bao_cao_danh_sach_hoc_vien.pdf", 
+                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo PDF: {str(e)}")
+                
+        with col2:
+            try:
+                # DOCX
+                docx_buffer = dataframe_to_docx(df_students_list, title3, "bao_cao_danh_sach_hoc_vien.docx")
+                st.markdown(get_download_link_docx(docx_buffer, "bao_cao_danh_sach_hoc_vien.docx", 
+                                            "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo DOCX: {str(e)}")
         
         st.write("### 4. Báo cáo thống kê theo lớp")
-        st.markdown(get_download_link(df_class_stats, "bao_cao_thong_ke_lop.csv", 
-                                     "Tải xuống thống kê theo lớp (CSV)"), unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        title4 = "Báo cáo thống kê theo lớp"
+        
+        with col1:
+            try:
+                # PDF
+                pdf_data = html_to_pdf(get_html_table(df_class_stats, title4), "bao_cao_thong_ke_lop.pdf")
+                if pdf_data:
+                    st.markdown(get_download_link_pdf(pdf_data, "bao_cao_thong_ke_lop.pdf", 
+                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo PDF: {str(e)}")
+                
+        with col2:
+            try:
+                # DOCX
+                docx_buffer = dataframe_to_docx(df_class_stats, title4, "bao_cao_thong_ke_lop.docx")
+                st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_lop.docx", 
+                                            "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Lỗi khi tạo DOCX: {str(e)}")
         
         st.write("### 5. Báo cáo tổng hợp (Excel)")
         
@@ -567,4 +994,3 @@ def view_statistics():
             
         except Exception as e:
             st.error(f"Lỗi khi tạo file Excel: {str(e)}")
-            st.info("Bạn có thể cần cài đặt thư viện openpyxl bằng cách thêm vào requirements.txt")
