@@ -16,10 +16,12 @@ except:
 try:
     supabase_url = st.secrets["SUPABASE_URL"]
     supabase_key = st.secrets["SUPABASE_KEY"]
-except:
+    print(f"Loaded Supabase credentials from Streamlit secrets")
+except Exception as e:
     # Fallback to environment variables
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_KEY")
+    print(f"Loaded Supabase credentials from environment variables: {e}")
 
 # Kiểm tra xem đã có thông tin kết nối chưa
 if not supabase_url or not supabase_key:
@@ -28,13 +30,20 @@ if not supabase_url or not supabase_key:
 # Kết nối đến Supabase
 try:
     supabase: Client = create_client(supabase_url, supabase_key)
+    print("Successfully connected to Supabase")
+    
+    # Kiểm tra xem đã có bảng users chưa
+    resp = supabase.table('users').select('count', count='exact').execute()
+    total_users = resp.count if hasattr(resp, 'count') else 0
+    print(f"Found {total_users} users in database")
+    
 except Exception as e:
     print(f"Error connecting to Supabase: {e}")
     # Để tránh crash ứng dụng khi chưa cấu hình, tạo mock object cho testing
     class MockSupabase:
         def table(self, name):
             return self
-        def select(self, *args):
+        def select(self, *args, **kwargs):
             return self
         def insert(self, data):
             return self
@@ -45,27 +54,60 @@ except Exception as e:
         def order(self, *args, **kwargs):
             return self
         def execute(self):
-            return type('obj', (object,), {'data': []})
+            return type('obj', (object,), {'data': [], 'count': 0})
         
     supabase = MockSupabase()
+
+def ensure_tables_exist():
+    """Đảm bảo các bảng cần thiết đã tồn tại"""
+    try:
+        # Tạo bảng users nếu chưa tồn tại
+        supabase.table('users').select('count', count='exact').limit(1).execute()
+        print("Users table exists")
+    except Exception as e:
+        print(f"Error checking users table: {e}")
+        # Tạo bảng users
+        try:
+            # PostgreSQL không hỗ trợ tạo bảng qua API, nên chỉ ghi log
+            print("Users table might not exist - please create it via SQL Editor")
+        except:
+            pass
 
 def add_default_user_if_not_exists():
     """Thêm tài khoản admin mặc định nếu chưa có"""
     try:
         # Kiểm tra xem có admin nào không
         response = supabase.table('users').select('*').eq('role', 'Admin').execute()
+        print(f"Found {len(response.data)} admin users")
         
         if len(response.data) == 0:
+            print("No admin found, creating default admin user")
             # Thêm admin mặc định
-            supabase.table('users').insert({
+            result = supabase.table('users').insert({
                 'email': 'admin@example.com',
                 'password': 'password123',
                 'role': 'Admin',
                 'first_login': True,
                 'full_name': 'Quản trị viên'
             }).execute()
+            print(f"Default admin created: {result.data}")
+        else:
+            print(f"Admin already exists: {response.data[0]['email']}")
     except Exception as e:
         print(f"Error adding default user: {e}")
+        # Thử lại một lần nữa với cách khác
+        try:
+            print("Trying alternative method to create admin...")
+            supabase.table('users').upsert({
+                'email': 'admin@example.com',
+                'password': 'password123',
+                'role': 'Admin',
+                'first_login': True,
+                'full_name': 'Quản trị viên'
+            }).execute()
+            print("Admin created using upsert")
+        except Exception as e2:
+            print(f"Failed to create admin with upsert: {e2}")
 
 def register_user(email, password, full_name, class_name):
     """Đăng ký người dùng mới với vai trò 'Học viên'"""
@@ -88,15 +130,19 @@ def register_user(email, password, full_name, class_name):
         
         return True, "Đăng ký thành công"
     except Exception as e:
+        print(f"Error registering user: {e}")
         return False, f"Lỗi khi đăng ký: {str(e)}"
 
 def get_user(email, password):
     """Kiểm tra đăng nhập và trả về thông tin người dùng"""
     try:
+        print(f"Attempting login for: {email}")
         response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
+        print(f"Login response contains {len(response.data)} users")
         
         if response.data:
             user = response.data[0]
+            print(f"User found: {user['email']} with role {user['role']}")
             return {
                 "email": user["email"],
                 "role": user["role"],
@@ -104,20 +150,30 @@ def get_user(email, password):
                 "full_name": user.get("full_name", ""),
                 "class": user.get("class", "")
             }
+        else:
+            # Kiểm tra xem user có tồn tại không (để biết lỗi ở email hay password)
+            user_exists = supabase.table('users').select('*').eq('email', email).execute()
+            if user_exists.data:
+                print(f"User exists but password is incorrect")
+            else:
+                print(f"No user found with email: {email}")
+            return None
     except Exception as e:
-        print(f"Error getting user: {e}")
+        print(f"Error during login: {e}")
     return None
 
 def update_password(email, new_password):
     """Cập nhật mật khẩu và đánh dấu đã đổi mật khẩu"""
     try:
+        print(f"Updating password for {email}")
         supabase.table('users').update({
             'password': new_password,
             'first_login': False
         }).eq('email', email).execute()
+        print("Password updated successfully")
         return True
     except Exception as e:
-        print(f"Lỗi khi cập nhật mật khẩu: {e}")
+        print(f"Error updating password: {e}")
         return False
 
 def get_all_users(role=None):
@@ -139,7 +195,7 @@ def get_all_users(role=None):
             })
         return users
     except Exception as e:
-        print(f"Lỗi khi lấy danh sách người dùng: {e}")
+        print(f"Error getting users: {e}")
         return []
 
 def save_question(question_data):
@@ -154,7 +210,7 @@ def save_question(question_data):
         }).execute()
         return True
     except Exception as e:
-        print(f"Lỗi khi lưu câu hỏi: {e}")
+        print(f"Error saving question: {e}")
         return False
 
 def get_all_questions():
@@ -174,7 +230,7 @@ def get_all_questions():
             })
         return questions
     except Exception as e:
-        print(f"Lỗi khi lấy danh sách câu hỏi: {e}")
+        print(f"Error getting questions: {e}")
         return []
 
 def save_submission(user_email, responses):
@@ -210,7 +266,7 @@ def save_submission(user_email, responses):
             "score": total_score
         }
     except Exception as e:
-        print(f"Lỗi khi lưu bài nộp: {e}")
+        print(f"Error saving submission: {e}")
         return None
 
 def get_user_submissions(user_email=None):
@@ -232,11 +288,14 @@ def get_user_submissions(user_email=None):
             })
         return submissions
     except Exception as e:
-        print(f"Lỗi khi lấy danh sách bài nộp: {e}")
+        print(f"Error getting submissions: {e}")
         return []
 
-# Khởi tạo dữ liệu mặc định khi import module
+# Khởi tạo database và thêm người dùng mặc định
 try:
+    print("Initializing database...")
+    ensure_tables_exist()
     add_default_user_if_not_exists()
+    print("Database initialization completed")
 except Exception as e:
     print(f"Error in initialization: {e}")
