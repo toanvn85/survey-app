@@ -4,7 +4,4 @@ matplotlib
 supabase
 python-dotenv
 openpyxl
-reportlab
 python-docx
-pdfkit
-WeasyPrint
