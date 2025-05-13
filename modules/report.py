@@ -6,6 +6,37 @@ import json
 from datetime import datetime
 import numpy as np
 
+def format_date(date_value):
+    """Định dạng ngày tháng từ nhiều kiểu dữ liệu khác nhau"""
+    if not date_value:
+        return "N/A"
+    
+    try:
+        # Nếu là số nguyên (timestamp)
+        if isinstance(date_value, (int, float)):
+            return datetime.fromtimestamp(date_value).strftime("%d/%m/%Y")
+        
+        # Nếu là chuỗi ISO (từ Supabase)
+        elif isinstance(date_value, str):
+            try:
+                # Thử parse chuỗi ISO
+                dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+                return dt.strftime("%d/%m/%Y")
+            except:
+                # Nếu không phải ISO, trả về nguyên bản
+                return date_value
+        
+        # Nếu đã là đối tượng datetime
+        elif isinstance(date_value, datetime):
+            return date_value.strftime("%d/%m/%Y")
+            
+        # Các trường hợp khác, trả về dạng chuỗi
+        else:
+            return str(date_value)
+    except Exception as e:
+        print(f"Error formatting date: {e}, value type: {type(date_value)}, value: {date_value}")
+        return "N/A"
+
 def view_statistics():
     st.title("📊 Báo cáo & thống kê")
     
@@ -290,8 +321,8 @@ def view_statistics():
                 # Tìm điểm cao nhất
                 max_student_score = max([s["score"] for s in student_submissions]) if student_submissions else 0
                 
-                # Thời gian đăng ký
-                registration_date = datetime.fromtimestamp(student["registration_date"]).strftime("%d/%m/%Y") if student.get("registration_date") else "N/A"
+                # Thời gian đăng ký - SỬA ĐOẠN NÀY
+                registration_date = format_date(student.get("registration_date"))
                 
                 student_data.append({
                     "full_name": student["full_name"],
