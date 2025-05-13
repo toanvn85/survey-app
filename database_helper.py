@@ -1,0 +1,199 @@
+import os
+import json
+import time
+from datetime import datetime
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+# Tải biến môi trường từ file .env (chỉ cho môi trường phát triển)
+load_dotenv()
+
+# Lấy thông tin kết nối Supabase từ biến môi trường
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_KEY")
+
+# Kết nối đến Supabase
+supabase: Client = create_client(supabase_url, supabase_key)
+
+def add_default_user_if_not_exists():
+    """Thêm tài khoản admin mặc định nếu chưa có"""
+    # Kiểm tra xem có admin nào không
+    response = supabase.table('users').select('*').eq('role', 'Admin').execute()
+    
+    if len(response.data) == 0:
+        # Thêm admin mặc định
+        supabase.table('users').insert({
+            'email': 'admin@example.com',
+            'password': 'password123',
+            'role': 'Admin',
+            'first_login': True,
+            'full_name': 'Quản trị viên'
+        }).execute()
+
+def register_user(email, password, full_name, class_name):
+    """Đăng ký người dùng mới với vai trò 'Học viên'"""
+    try:
+        # Kiểm tra xem email đã tồn tại chưa
+        response = supabase.table('users').select('*').eq('email', email).execute()
+        if len(response.data) > 0:
+            return False, "Email này đã được đăng ký"
+        
+        # Thêm người dùng mới
+        supabase.table('users').insert({
+            'email': email,
+            'password': password,
+            'role': 'Học viên',
+            'first_login': True,
+            'full_name': full_name,
+            'class': class_name,
+            'registration_date': datetime.now().isoformat()
+        }).execute()
+        
+        return True, "Đăng ký thành công"
+    except Exception as e:
+        return False, f"Lỗi khi đăng ký: {str(e)}"
+
+def get_user(email, password):
+    """Kiểm tra đăng nhập và trả về thông tin người dùng"""
+    response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
+    
+    if response.data:
+        user = response.data[0]
+        return {
+            "email": user["email"],
+            "role": user["role"],
+            "first_login": user.get("first_login", False),
+            "full_name": user.get("full_name", ""),
+            "class": user.get("class", "")
+        }
+    return None
+
+def update_password(email, new_password):
+    """Cập nhật mật khẩu và đánh dấu đã đổi mật khẩu"""
+    try:
+        supabase.table('users').update({
+            'password': new_password,
+            'first_login': False
+        }).eq('email', email).execute()
+        return True
+    except Exception as e:
+        print(f"Lỗi khi cập nhật mật khẩu: {e}")
+        return False
+
+def get_all_users(role=None):
+    """Lấy danh sách tất cả người dùng, có thể lọc theo vai trò"""
+    try:
+        if role:
+            response = supabase.table('users').select('*').eq('role', role).execute()
+        else:
+            response = supabase.table('users').select('*').execute()
+        
+        users = []
+        for user in response.data:
+            users.append({
+                "email": user["email"],
+                "role": user["role"],
+                "full_name": user.get("full_name", ""),
+                "class": user.get("class", ""),
+                "registration_date": user.get("registration_date")
+            })
+        return users
+    except Exception as e:
+        print(f"Lỗi khi lấy danh sách người dùng: {e}")
+        return []
+
+def save_question(question_data):
+    """Lưu câu hỏi vào database"""
+    try:
+        supabase.table('questions').insert({
+            'question': question_data["question"],
+            'type': question_data["type"],
+            'answers': json.dumps(question_data["answers"]),
+            'correct': json.dumps(question_data["correct"]),
+            'score': question_data["score"]
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Lỗi khi lưu câu hỏi: {e}")
+        return False
+
+def get_all_questions():
+    """Lấy tất cả câu hỏi từ database"""
+    try:
+        response = supabase.table('questions').select('*').execute()
+        
+        questions = []
+        for item in response.data:
+            questions.append({
+                "id": item["id"],
+                "question": item["question"],
+                "type": item["type"],
+                "answers": json.loads(item["answers"]) if isinstance(item["answers"], str) else item["answers"],
+                "correct": json.loads(item["correct"]) if isinstance(item["correct"], str) else item["correct"],
+                "score": item["score"]
+            })
+        return questions
+    except Exception as e:
+        print(f"Lỗi khi lấy danh sách câu hỏi: {e}")
+        return []
+
+def save_submission(user_email, responses):
+    """Lưu một lần nộp bài của người dùng"""
+    try:
+        # Tính điểm
+        questions = get_all_questions()
+        total_score = 0
+        
+        for q in questions:
+            q_id = q["id"]
+            if str(q_id) in responses:
+                user_ans = responses[str(q_id)]
+                expected = [q["answers"][i - 1] for i in q["correct"]]
+                
+                if set(user_ans) == set(expected):
+                    total_score += q["score"]
+        
+        # Lưu kết quả
+        result = supabase.table('submissions').insert({
+            'user_email': user_email,
+            'responses': json.dumps(responses),
+            'score': total_score,
+            'timestamp': datetime.now().isoformat()
+        }).execute()
+        
+        submission_id = result.data[0]["id"]
+        submission_time = result.data[0]["timestamp"]
+        
+        return {
+            "id": submission_id,
+            "timestamp": int(datetime.fromisoformat(submission_time).timestamp()),
+            "score": total_score
+        }
+    except Exception as e:
+        print(f"Lỗi khi lưu bài nộp: {e}")
+        return None
+
+def get_user_submissions(user_email=None):
+    """Lấy tất cả các lần nộp bài, có thể lọc theo email"""
+    try:
+        if user_email:
+            response = supabase.table('submissions').select('*').eq('user_email', user_email).order('timestamp', desc=True).execute()
+        else:
+            response = supabase.table('submissions').select('*').order('timestamp', desc=True).execute()
+        
+        submissions = []
+        for item in response.data:
+            submissions.append({
+                "id": item["id"],
+                "user_email": item["user_email"],
+                "timestamp": int(datetime.fromisoformat(item["timestamp"]).timestamp()),
+                "responses": json.loads(item["responses"]) if isinstance(item["responses"], str) else item["responses"],
+                "score": item["score"]
+            })
+        return submissions
+    except Exception as e:
+        print(f"Lỗi khi lấy danh sách bài nộp: {e}")
+        return []
+
+# Khởi tạo dữ liệu mặc định khi import module
+add_default_user_if_not_exists()
