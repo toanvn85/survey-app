@@ -1,34 +1,71 @@
 import os
 import json
 import time
+import streamlit as st
 from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 # Tải biến môi trường từ file .env (chỉ cho môi trường phát triển)
-load_dotenv()
+try:
+    load_dotenv()
+except:
+    pass
 
-# Lấy thông tin kết nối Supabase từ biến môi trường
-supabase_url = os.environ.get("SUPABASE_URL")
-supabase_key = os.environ.get("SUPABASE_KEY")
+# Ưu tiên lấy từ Streamlit secrets, nếu không có thì lấy từ biến môi trường
+try:
+    supabase_url = st.secrets["SUPABASE_URL"]
+    supabase_key = st.secrets["SUPABASE_KEY"]
+except:
+    # Fallback to environment variables
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+
+# Kiểm tra xem đã có thông tin kết nối chưa
+if not supabase_url or not supabase_key:
+    print("WARNING: Missing Supabase credentials. Make sure to set SUPABASE_URL and SUPABASE_KEY.")
 
 # Kết nối đến Supabase
-supabase: Client = create_client(supabase_url, supabase_key)
+try:
+    supabase: Client = create_client(supabase_url, supabase_key)
+except Exception as e:
+    print(f"Error connecting to Supabase: {e}")
+    # Để tránh crash ứng dụng khi chưa cấu hình, tạo mock object cho testing
+    class MockSupabase:
+        def table(self, name):
+            return self
+        def select(self, *args):
+            return self
+        def insert(self, data):
+            return self
+        def update(self, data):
+            return self
+        def eq(self, *args):
+            return self
+        def order(self, *args, **kwargs):
+            return self
+        def execute(self):
+            return type('obj', (object,), {'data': []})
+        
+    supabase = MockSupabase()
 
 def add_default_user_if_not_exists():
     """Thêm tài khoản admin mặc định nếu chưa có"""
-    # Kiểm tra xem có admin nào không
-    response = supabase.table('users').select('*').eq('role', 'Admin').execute()
-    
-    if len(response.data) == 0:
-        # Thêm admin mặc định
-        supabase.table('users').insert({
-            'email': 'admin@example.com',
-            'password': 'password123',
-            'role': 'Admin',
-            'first_login': True,
-            'full_name': 'Quản trị viên'
-        }).execute()
+    try:
+        # Kiểm tra xem có admin nào không
+        response = supabase.table('users').select('*').eq('role', 'Admin').execute()
+        
+        if len(response.data) == 0:
+            # Thêm admin mặc định
+            supabase.table('users').insert({
+                'email': 'admin@example.com',
+                'password': 'password123',
+                'role': 'Admin',
+                'first_login': True,
+                'full_name': 'Quản trị viên'
+            }).execute()
+    except Exception as e:
+        print(f"Error adding default user: {e}")
 
 def register_user(email, password, full_name, class_name):
     """Đăng ký người dùng mới với vai trò 'Học viên'"""
@@ -55,17 +92,20 @@ def register_user(email, password, full_name, class_name):
 
 def get_user(email, password):
     """Kiểm tra đăng nhập và trả về thông tin người dùng"""
-    response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
-    
-    if response.data:
-        user = response.data[0]
-        return {
-            "email": user["email"],
-            "role": user["role"],
-            "first_login": user.get("first_login", False),
-            "full_name": user.get("full_name", ""),
-            "class": user.get("class", "")
-        }
+    try:
+        response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
+        
+        if response.data:
+            user = response.data[0]
+            return {
+                "email": user["email"],
+                "role": user["role"],
+                "first_login": user.get("first_login", False),
+                "full_name": user.get("full_name", ""),
+                "class": user.get("class", "")
+            }
+    except Exception as e:
+        print(f"Error getting user: {e}")
     return None
 
 def update_password(email, new_password):
@@ -196,4 +236,7 @@ def get_user_submissions(user_email=None):
         return []
 
 # Khởi tạo dữ liệu mặc định khi import module
-add_default_user_if_not_exists()
+try:
+    add_default_user_if_not_exists()
+except Exception as e:
+    print(f"Error in initialization: {e}")
