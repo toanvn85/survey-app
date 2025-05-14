@@ -308,6 +308,43 @@ def get_user_submissions(user_email=None):
         print(f"Error getting submissions: {e}")
         return []
 
+# Thêm các hàm này vào database_helper.py
+
+def update_question(question_id, updated_data):
+    """Cập nhật thông tin câu hỏi theo ID"""
+    try:
+        # Giả định bạn đã có biến supabase client
+        result = supabase.table("questions").update(updated_data).eq("id", question_id).execute()
+        if result.data:
+            return True
+        return False
+    except Exception as e:
+        print(f"Lỗi khi cập nhật câu hỏi: {e}")
+        return False
+
+def delete_question(question_id):
+    """Xóa câu hỏi theo ID"""
+    try:
+        # Giả định bạn đã có biến supabase client
+        result = supabase.table("questions").delete().eq("id", question_id).execute()
+        if result.data:
+            return True
+        return False
+    except Exception as e:
+        print(f"Lỗi khi xóa câu hỏi: {e}")
+        return False
+
+def get_question_by_id(question_id):
+    """Lấy thông tin câu hỏi theo ID"""
+    try:
+        result = supabase.table("questions").select("*").eq("id", question_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    except Exception as e:
+        print(f"Lỗi khi lấy câu hỏi: {e}")
+        return None
+    
 # Khởi tạo database và thêm người dùng mặc định
 try:
     print("Initializing database...")
