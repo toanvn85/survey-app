@@ -51,13 +51,15 @@ def manage_questions():
 
 def add_new_question():
     q = st.session_state.new_question
-    q["question"] = st.text_input("Nội dung câu hỏi", value=q["question"])
-    q["type"] = st.selectbox("Loại câu hỏi", ["Checkbox", "Combobox"], index=["Checkbox", "Combobox"].index(q["type"]))
-    q["score"] = st.number_input("Số điểm", min_value=1, value=q["score"])
+    q["question"] = st.text_input("Nội dung câu hỏi", value=q["question"], key="new_question_content")
+    q["type"] = st.selectbox("Loại câu hỏi", ["Checkbox", "Combobox"], 
+                          index=["Checkbox", "Combobox"].index(q["type"]),
+                          key="new_question_type")
+    q["score"] = st.number_input("Số điểm", min_value=1, value=q["score"], key="new_question_score")
 
     # Quản lý danh sách đáp án
     st.subheader("Danh sách đáp án")
-    new_ans = st.text_input("Thêm đáp án mới")
+    new_ans = st.text_input("Thêm đáp án mới", key="new_answer_input")
     if st.button("➕ Thêm đáp án", key="add_answer_btn"):
         if new_ans:
             q["answers"].append(new_ans)
@@ -66,13 +68,14 @@ def add_new_question():
     for idx, ans in enumerate(q["answers"]):
         col1, col2 = st.columns([5, 1])
         col1.write(f"{idx + 1}. {ans}")
-        if col2.button("🗑️", key=f"del_ans_{idx}"):
+        if col2.button("🗑️", key=f"del_ans_new_{idx}"):
             q["answers"].pop(idx)
             st.rerun()
 
     # Đáp án đúng
     correct_ans = st.text_input("Đáp án đúng (STT, phân cách bằng dấu phẩy)", 
-                              value=",".join(map(str, q["correct"])))
+                              value=",".join(map(str, q["correct"])),
+                              key="new_correct_answers")
     if correct_ans:
         try:
             q["correct"] = list(map(int, correct_ans.split(",")))
@@ -141,21 +144,23 @@ def list_questions():
                     st.session_state.question_to_delete = q
                     st.rerun()
                     
-        if st.button("🔄 Làm mới danh sách"):
+        if st.button("🔄 Làm mới danh sách", key="refresh_question_list"):
             st.session_state.db_questions = get_all_questions()
             st.rerun()
 
 def edit_question():
     """Chức năng chỉnh sửa câu hỏi"""
     q = st.session_state.editing_question
+    q_id = q['id']  # Lấy ID câu hỏi để tạo key duy nhất
     
-    st.subheader(f"Chỉnh sửa câu hỏi #{q['id']}")
+    st.subheader(f"Chỉnh sửa câu hỏi #{q_id}")
     
     # Form chỉnh sửa câu hỏi
-    edited_question = st.text_input("Nội dung câu hỏi", value=q["question"])
+    edited_question = st.text_input("Nội dung câu hỏi", value=q["question"], key=f"edit_question_content_{q_id}")
     edited_type = st.selectbox("Loại câu hỏi", ["Checkbox", "Combobox"], 
-                             index=["Checkbox", "Combobox"].index(q["type"]))
-    edited_score = st.number_input("Số điểm", min_value=1, value=q["score"])
+                             index=["Checkbox", "Combobox"].index(q["type"]),
+                             key=f"edit_question_type_{q_id}")
+    edited_score = st.number_input("Số điểm", min_value=1, value=q["score"], key=f"edit_question_score_{q_id}")
     
     # Sao chép danh sách đáp án để có thể chỉnh sửa
     if "edited_answers" not in st.session_state:
@@ -167,8 +172,8 @@ def edit_question():
     
     # Quản lý danh sách đáp án
     st.subheader("Danh sách đáp án")
-    new_ans = st.text_input("Thêm đáp án mới", key="edit_new_ans")
-    if st.button("➕ Thêm đáp án", key="edit_add_ans"):
+    new_ans = st.text_input("Thêm đáp án mới", key=f"edit_new_ans_{q_id}")
+    if st.button("➕ Thêm đáp án", key=f"edit_add_ans_{q_id}"):
         if new_ans:
             st.session_state.edited_answers.append(new_ans)
             st.rerun()
@@ -178,12 +183,12 @@ def edit_question():
         col1, col2, col3 = st.columns([4, 1, 1])
         
         # Trường nhập liệu để sửa đáp án
-        edited_ans = col1.text_input(f"Đáp án {idx+1}", value=ans, key=f"edit_ans_{idx}")
+        edited_ans = col1.text_input(f"Đáp án {idx+1}", value=ans, key=f"edit_ans_{q_id}_{idx}")
         st.session_state.edited_answers[idx] = edited_ans
         
         # Checkbox để đánh dấu đáp án đúng
         is_correct = (idx + 1) in st.session_state.edited_correct
-        if col2.checkbox("✓", value=is_correct, key=f"edit_correct_{idx}"):
+        if col2.checkbox("✓", value=is_correct, key=f"edit_correct_{q_id}_{idx}"):
             if (idx + 1) not in st.session_state.edited_correct:
                 st.session_state.edited_correct.append(idx + 1)
         else:
@@ -191,7 +196,7 @@ def edit_question():
                 st.session_state.edited_correct.remove(idx + 1)
         
         # Nút xóa đáp án
-        if col3.button("🗑️", key=f"edit_del_ans_{idx}"):
+        if col3.button("🗑️", key=f"edit_del_ans_{q_id}_{idx}"):
             st.session_state.edited_answers.pop(idx)
             # Cập nhật lại danh sách đáp án đúng
             st.session_state.edited_correct = [c for c in st.session_state.edited_correct if c != idx + 1]
@@ -202,7 +207,7 @@ def edit_question():
     # Nút lưu và hủy
     col1, col2 = st.columns(2)
     
-    if col1.button("💾 Lưu thay đổi", use_container_width=True):
+    if col1.button("💾 Lưu thay đổi", use_container_width=True, key=f"save_edit_{q_id}"):
         if not edited_question:
             st.error("Vui lòng nhập nội dung câu hỏi")
         elif not st.session_state.edited_answers:
@@ -220,7 +225,7 @@ def edit_question():
             }
             
             # Lưu thay đổi vào database
-            if update_question(q["id"], updated_data):
+            if update_question(q_id, updated_data):
                 # Xóa dữ liệu chỉnh sửa
                 st.session_state.editing_question = None
                 if "edited_answers" in st.session_state:
@@ -235,7 +240,7 @@ def edit_question():
             else:
                 st.error("❌ Có lỗi xảy ra khi cập nhật câu hỏi!")
     
-    if col2.button("❌ Hủy", use_container_width=True):
+    if col2.button("❌ Hủy", use_container_width=True, key=f"cancel_edit_{q_id}"):
         # Xóa dữ liệu chỉnh sửa
         st.session_state.editing_question = None
         if "edited_answers" in st.session_state:
@@ -247,14 +252,15 @@ def edit_question():
 def delete_confirmation():
     """Hiển thị hộp xác nhận xóa câu hỏi"""
     q = st.session_state.question_to_delete
+    q_id = q['id']
     
     st.warning(f"Bạn có chắc chắn muốn xóa câu hỏi sau đây?")
-    st.info(f"Câu hỏi #{q['id']}: {q['question']}")
+    st.info(f"Câu hỏi #{q_id}: {q['question']}")
     
     col1, col2 = st.columns(2)
     
-    if col1.button("✅ Xác nhận xóa", use_container_width=True):
-        if delete_question(q["id"]):
+    if col1.button("✅ Xác nhận xóa", use_container_width=True, key=f"confirm_delete_{q_id}"):
+        if delete_question(q_id):
             # Làm mới danh sách câu hỏi
             st.session_state.db_questions = get_all_questions()
             st.session_state.question_to_delete = None
@@ -263,6 +269,6 @@ def delete_confirmation():
         else:
             st.error("❌ Có lỗi xảy ra khi xóa câu hỏi!")
     
-    if col2.button("❌ Hủy", use_container_width=True):
+    if col2.button("❌ Hủy", use_container_width=True, key=f"cancel_delete_{q_id}"):
         st.session_state.question_to_delete = None
         st.rerun()
