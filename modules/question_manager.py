@@ -1,5 +1,6 @@
 import streamlit as st
 from database_helper import save_question, get_all_questions, get_question_by_id, update_question, delete_question
+import json
 
 def manage_questions():
     st.title("Quản lý câu hỏi")
@@ -126,8 +127,27 @@ def list_questions():
                 st.write(f"**Điểm:** {q['score']}")
                 
                 st.write("**Các đáp án:**")
-                for j, ans in enumerate(q["answers"]):
-                    is_correct = (j + 1) in q["correct"]
+                # Đảm bảo answers là list
+                answers = q["answers"]
+                if isinstance(answers, str):
+                    try:
+                        answers = json.loads(answers)
+                    except:
+                        answers = [answers]
+                
+                # Đảm bảo correct là list
+                correct = q["correct"]
+                if isinstance(correct, str):
+                    try:
+                        correct = json.loads(correct)
+                    except:
+                        try:
+                            correct = [int(x.strip()) for x in correct.split(",")]
+                        except:
+                            correct = []
+                
+                for j, ans in enumerate(answers):
+                    is_correct = (j + 1) in correct
                     st.write(f"- {j + 1}. {ans} {' ✅' if is_correct else ''}")
                 
                 # Thêm nút sửa và xóa
@@ -164,11 +184,36 @@ def edit_question():
     
     # Sao chép danh sách đáp án để có thể chỉnh sửa
     if "edited_answers" not in st.session_state:
-        st.session_state.edited_answers = q["answers"].copy()
+        # Đảm bảo q["answers"] là danh sách
+        if isinstance(q["answers"], str):
+            try:
+                # Nếu là JSON string, thử chuyển đổi thành list
+                answers_list = json.loads(q["answers"])
+                st.session_state.edited_answers = answers_list
+            except:
+                # Nếu không thể parse JSON, tạo list từ string
+                st.session_state.edited_answers = [q["answers"]]
+        else:
+            # Nếu đã là list, sao chép nó
+            st.session_state.edited_answers = list(q["answers"])
     
     # Sao chép đáp án đúng
     if "edited_correct" not in st.session_state:
-        st.session_state.edited_correct = q["correct"].copy()
+        # Đảm bảo q["correct"] là danh sách
+        if isinstance(q["correct"], str):
+            try:
+                # Nếu là JSON string, thử chuyển đổi thành list
+                correct_list = json.loads(q["correct"])
+                st.session_state.edited_correct = correct_list
+            except:
+                # Nếu không thể parse JSON, thử chuyển đổi từ dạng "1,2,3" thành [1,2,3]
+                try:
+                    st.session_state.edited_correct = [int(x.strip()) for x in q["correct"].split(",")]
+                except:
+                    st.session_state.edited_correct = []
+        else:
+            # Nếu đã là list, sao chép nó
+            st.session_state.edited_correct = list(q["correct"])
     
     # Quản lý danh sách đáp án
     st.subheader("Danh sách đáp án")
